@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_all
+from PyInstaller.utils.hooks import collect_data_files, collect_all
 
 block_cipher = None
 
@@ -10,7 +10,7 @@ datas = []
 binaries = []
 hidden_imports = []
 
-libs_to_collect = ['TTS', 'ko_speech_tools', 'transformers']
+libs_to_collect = ['chatterbox', 'vieneu', 'vieneu_utils', 'transformers']
 for lib in libs_to_collect:
     tmp_ret = collect_all(lib)
     datas += tmp_ret[0]
@@ -21,21 +21,21 @@ for lib in libs_to_collect:
 hidden_imports += [
     'torch',
     'torchaudio',
-    'torchvision',
+    'chatterbox',
+    'vieneu',
     'faster_whisper',
     'pydub',
-    'typeguard',
-    'inflect',
-    'anyascii',
     'librosa',
     'scipy.signal',
     'scipy.sparse.csgraph._validation',
     'numpy',
-    'onnxruntime'
+    'onnxruntime',
+    's3tokenizer',
+    'conformer',
+    'diffusers',
+    'perth'
 ]
-
-# HEAVY DLL PACKAGE EXCLUSIONS
-# We exclude ALL DLLs from torch and ctranslate2 to keep EXE small and avoid load errors.
+# Keep onefile EXE lean: heavy runtime DLLs are shipped externally via copy_dlls.bat
 excluded_packages = ['torch', 'ctranslate2']
 
 # Include ffmpeg binaries
@@ -44,6 +44,18 @@ binaries += [
     ('ffprobe.exe', '.'),
     ('ffplay.exe', '.')
 ]
+
+# Bundle MSVC runtime next to executable to avoid torch._C load failures
+msvc_runtime_candidates = [
+    os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Python', 'Python311', 'vcruntime140.dll'),
+    os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Python', 'Python311', 'vcruntime140_1.dll'),
+    r'C:\Windows\System32\msvcp140.dll',
+    r'C:\Windows\System32\msvcp140_1.dll',
+    r'C:\Windows\System32\concrt140.dll',
+]
+for dll_path in msvc_runtime_candidates:
+    if os.path.exists(dll_path):
+        binaries.append((dll_path, '.'))
 
 a = Analysis(
     ['main.py'],
@@ -54,26 +66,24 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'test', 'unittest', 'pydoc'], # Basic Python exclusions
+    excludes=['tkinter'], # Some AI deps import stdlib modules like unittest/pydoc at runtime.
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
 
-# Robust exclusion of ALL DLLs belonging to heavy packages
+# Robust exclusion of heavy external DLLs from packed EXE
 def is_excluded_dll(name, path):
     name_lower = name.lower()
     path_lower = path.lower()
     if not name_lower.endswith('.dll'):
         return False
-    # Check if the DLL belongs to one of the heavy packages by looking at its source path
     for pkg in excluded_packages:
         if f'\\{pkg}\\' in path_lower or f'/{pkg}/' in path_lower:
             return True
     return False
 
-# Filter both binaries and datas
 a.binaries = [b for b in a.binaries if not is_excluded_dll(b[0], b[1])]
 a.datas = [d for d in a.datas if not is_excluded_dll(d[0], d[1])]
 
